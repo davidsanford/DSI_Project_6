@@ -9,53 +9,20 @@ from sqlalchemy import create_engine
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import CountVectorizer
 
+from common import sql_engine
 
-base_url = "https://en.wikipedia.org/wiki/Category:"
-
-input_string = sys.argv[1]
-search_terms = []
+if len(sys.argv) < 2:
+    print "No arguments passed.  Need at least one category name or file with category list."
+    quit()
 
 preprocessor = CountVectorizer().build_preprocessor()
 tokenizer = CountVectorizer().build_tokenizer()
 
-username = ""
-password = ""
-
-def sql_engine():
-    fin = open("sql_credentials.txt")
-    for line in fin:
-        print line
-        matches = re.search("(\w+) : (.+)",line)
-
-        if matches is not None:
-            if matches.group(1) is "username":
-                username = matches.group(2)
-
-                
-            if matches.group(1) is "username":
-                password = matches.group(2)
 
 
+def category_pages(category):
 
-sql_engine()
-
-quit()
-
-for arg in sys.argv[1:]:
-    if '.' in arg:
-        fin = open(arg)
-        for line in fin:
-            match = re.match(r"[\W]+(\w.+)",line)
-            if match != None:
-                search_terms.append(match.group(1))
-
-    else:
-        match = re.match(r"(\w.+)",arg)
-        if match != None:
-            search_terms.append(match.group(1))
-
-for term in search_terms:
-    HTTP = "https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:{}&cmlimit=500&format=json".format(term)
+    HTTP = "https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:{}&cmlimit=500&titles={}&format=json".format(category,category)
 
     response = requests.get(HTTP)
 
@@ -63,35 +30,108 @@ for term in search_terms:
     text_file.write(response.text)
     text_file.close()
 
-    category_pages = \
-        pd.DataFrame(json.loads(response.text)["query"]["categorymembers"])
+    data_dict = json.loads(response.text)
+
+    subject_pages = \
+        pd.DataFrame(data_dict["query"]["categorymembers"])
 
     # Restrict to pages, dropping sub-categories
-    category_pages = category_pages[category_pages['ns'] == 0]
+    if subject_pages.empty == False:
+        subject_pages = subject_pages[subject_pages['ns'] == 0]
 
-    for i in range(min(category_pages.shape[0], 2)):
+    category_dict = data_dict["query"]["pages"][data_dict["query"]["pages"].keys()[0]]
 
-        page_code = category_pages.iloc[i,1]
-        page_name = category_pages.iloc[i,2]
+    categoryid = category_dict.get("pageid","")
+    categoryname = category_dict.get("title","")
 
-        print page_code,page_name
-        HTTP = "https://en.wikipedia.org/w/api.php?action=parse&page={}&prop=sections&format=json".format(page_name)
+    return (categoryid, categoryname, subject_pages)
 
-        response = requests.get(HTTP)
 
-        page_sections = \
-            pd.DataFrame(json.loads(response.text)['parse']['sections'])
 
-        print page_sections
+def page_info(page_code, page_name):
 
-        HTTP ="https://en.wikipedia.org/w/api.php?action=parse&format=json&page={}&prop=text&contentmodel=wikitext".format(page_name)
+    HTTP ="https://en.wikipedia.org/w/api.php?action=parse&format=json&page={}&prop=text|sections&contentmodel=wikitext".format(page_name)
 
-        response = requests.get(HTTP)
-        extracted_text = json.loads(response.text)['parse']['text']['*']
-        soup = BeautifulSoup(extracted_text)
+    response = requests.get(HTTP)
 
-        processed_text = preprocessor(preprocessor(soup.get_text()))
-        merged_text = " ".join(tokenizer(processed_text.replace('\n',' ')))
+    data_dict = json.loads(response.text)
 
-        print merged_text
+    page_sections = \
+        pd.DataFrame(data_dict['parse']['sections'])
 
+    extracted_text = data_dict['parse']['text']['*']
+    soup = BeautifulSoup(extracted_text, "lxml")
+
+    processed_text = preprocessor(preprocessor(soup.get_text()))
+    merged_text = " ".join(tokenizer(processed_text.replace('\n',' ')))
+
+    return merged_text, page_sections
+
+
+
+def categories_from_file(filename):
+    fin = open(arg)
+    terms = []
+    for line in fin:
+        match = re.match(r"[\W]+(\w.+)",line)
+        if match != None:
+            terms.append(match.group(1))
+
+    return terms
+
+
+
+def category_list(term_list):
+
+    categories = []
+
+    for arg in term_list:
+        if '.' in arg:
+            categories = categories + categories_from_file(arg)
+
+        else:
+            match = re.match(r"(\w.+)",arg)
+            if match != None:
+                categories.append(match.group(1))  
+
+    return categories
+
+
+
+search_terms = category_list(sys.argv[1:])
+
+engine = sql_engine()
+
+for term in search_terms:
+
+    categoryid, categoryname, pages = category_pages(term)
+
+    if pages.empty is True or categoryid is "" or categoryname is "":
+        print "ERROR : Category name \""+term+"\" does not exist" 
+        continue
+
+    print pages
+
+#    sql = """
+#    INSERT INTO category (bigint, category_name)
+#    VALUES ({}, {});
+#    """.format(categoryid,categoryname)
+
+#    engine.execute(sql)
+
+    for i in range(pages.shape[0]):
+        info = page_info(pages['pageid'].iloc[i],
+                         pages['title'].iloc[i])
+
+        print pages['pageid'].iloc[i], pages['title'].iloc[i]
+        print info[0][:200],"\n"
+
+#        sql = """
+#        INSERT INTO page (page_id, category_id, title, created_at, page,
+#                          fk_category_id
+#    FOREIGN KEY (category_id)
+#    REFERENCES category (category_id)), , , )
+#        VALUES ({}, {}, {}, {});
+#        """.format(cat_pages["categoryid"],)
+
+#    engine.execute(sql)
