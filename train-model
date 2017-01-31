@@ -1,0 +1,23 @@
+#!/Users/dsanford/anaconda/bin/python
+
+import sys
+import requests
+import pandas as pd
+import json
+from sqlalchemy import create_engine
+from bs4 import BeautifulSoup
+from sklearn.feature_extraction.text import CountVectorizer
+
+from common import sql_engine
+
+if len(sys.argv) < 2:
+    print "No arguments passed.  Need at least one category name or file with category list."
+    quit()
+
+preprocessor = CountVectorizer().build_preprocessor()
+tokenizer = CountVectorizer().build_tokenizer()
+
+engine = sql_engine()
+categories, pages = get_databases(engine)
+
+pages["page_id"]

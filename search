@@ -1,5 +1,25 @@
 #!/Users/dsanford/anaconda/bin/python
 
+import re
+import sys
 from common.py import sql_engine
 from sqlalchemy import create_engine
 
+if len(sys.argv) < 3:
+    print "Not enough arguments.  Expected \"search [top|full] [search terms]."
+    quit()
+
+
+
+def grab_data
+
+#    sql = """
+#    INSERT INTO category (bigint, category_name)
+#    VALUES ({}, {});
+#    """.format(categoryid,categoryname)
+
+#    engine.execute(sql)
+
+
+
+search_terms = sys.argv[2:]

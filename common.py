@@ -2,6 +2,7 @@ import re
 from sqlalchemy import create_engine
 
 def sql_engine():
+
     fin = open("sql_credentials.txt")
 
     username = ""
@@ -28,3 +29,13 @@ def sql_engine():
     engine = create_engine(connect_param)
 
     return engine
+
+def get_databases(engine):
+
+    sql = "SELECT * FROM category"
+    categories = pd.read_sql("SELECT * FROM category", con=engine)
+
+    sql = "SELECT * FROM page"
+    pages = pd.read_sql("SELECT * FROM page", con=engine)
+
+    return (categories, pages)
