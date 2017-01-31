@@ -1,3 +1,4 @@
 sql_credentials.txt
 *~
 Testing*.ipynb
+*.pyc
