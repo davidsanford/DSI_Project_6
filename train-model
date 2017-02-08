@@ -1,23 +1,159 @@
 #!/Users/dsanford/anaconda/bin/python
 
-import sys
-import requests
 import pandas as pd
-import json
-from sqlalchemy import create_engine
-from bs4 import BeautifulSoup
+
+from lib.database_module import connect_to_postgres
+
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model.logistic import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
+
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import train_test_split
+
+from sklearn.metrics import accuracy_score
+
 from sklearn.feature_extraction.text import CountVectorizer
 
-from common import sql_engine
+from sklearn.externals import joblib
 
-if len(sys.argv) < 2:
-    print "No arguments passed.  Need at least one category name or file with category list."
-    quit()
 
-preprocessor = CountVectorizer().build_preprocessor()
-tokenizer = CountVectorizer().build_tokenizer()
+engine = connect_to_postgres()
 
-engine = sql_engine()
-categories, pages = get_databases(engine)
+pages = pd.read_sql("SELECT * FROM page;", con=engine[0])
+categories = pd.read_sql("SELECT * FROM category;", con=engine[0])
+category_vec = pd.read_sql("SELECT * FROM cate_vec;", con=engine[0])
+page_vec = pd.read_sql("SELECT * FROM page_vec;", con=engine[0])
+page_category = pd.read_sql("SELECT * FROM page_cate;", con=engine[0])
 
-pages["page_id"]
+
+
+X_base = pages
+X_base["num_categories"] = X_base['page_id'].apply(lambda page_id: page_category[page_category['page_id'] == page_id]['category_id'].shape[0])
+
+X_cut = X_base[X_base['num_categories'] == 1]
+X_cut['category'] = X_cut['category'] = \
+    X_cut['page_id'].apply(lambda page_id: page_category[page_category['page_id'] == page_id]['category_id'].iloc[0])
+
+pages_in_categories = X_cut.groupby('category').agg('sum')['num_categories']
+low_pop_categories = [pages_in_categories.index[i] for i, val in enumerate(list(pages_in_categories)) if val < 10]
+
+X_cut = X_cut[X_cut['category'].apply(lambda x: x not in low_pop_categories)]
+
+y = X_cut['category']
+
+
+
+model_inputs = []
+trained_models = []
+
+knn = KNeighborsClassifier(n_neighbors=5, weights='distance')
+knn_params = {'n_neighbors':[3,5]}
+
+model_inputs.append(["K-Nearest Neighbors",knn, knn_params])
+
+lr = LogisticRegression()
+lr_params = {'C':[1,0.1,0.01]}
+
+model_inputs.append(["Logistic Regression",lr, lr_params])
+
+svc = SVC(kernel='rbf')
+svc_params = {'C':[1,100]}
+
+model_inputs.append(["SVC",svc, svc_params])
+
+dt = DecisionTreeClassifier()
+dt_params = {'criterion':['gini','entropy'], 'max_depth':[None, 20, 40]}
+
+model_inputs.append(["Decision Tree", dt, dt_params])
+
+rf = RandomForestClassifier()
+rf_params = {'criterion':['gini','entropy'], 'n_estimators':[5,10,20]}
+
+model_inputs.append(["Random Forest", rf, rf_params])
+
+et = ExtraTreesClassifier()
+
+model_inputs.append(["Extra Trees", et, rf_params])
+
+
+
+for threshold in [30,100,300,1000]:
+
+    print "Threshold:",threshold
+
+    X = X_cut
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3,
+                                                        random_state = 597)
+
+    count = CountVectorizer(stop_words='english', min_df = threshold)
+
+    count.fit(X_train['page'])
+
+    X_train = pd.DataFrame(count.transform(X_train['page']).todense(),
+                           columns=count.get_feature_names())
+
+    for model in model_inputs:
+
+        print "Model:",model[0]
+
+        temp_grid = GridSearchCV(estimator = model[1], cv=5,
+                                 scoring='accuracy', param_grid=model[2])
+
+        temp_grid.fit(X_train.as_matrix(), y_train)
+        trained_models.append({"Name":model[0],"Grid":temp_grid,
+                               "Score":temp_grid.best_score_,
+                               "Best_Estimator":temp_grid.best_estimator_,
+                               "Threshold":threshold})
+
+
+models = pd.DataFrame(trained_models)
+
+print models
+
+
+models.to_pickle("full_model_grid.pkl")
+
+max_score = models['Score'].max()
+
+overall_best = models[models['Score'] == max_score]
+
+best_threshold = overall_best['Threshold'].iloc[0]
+
+X = X_cut
+    
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3,
+                                                    random_state = 597)
+
+count = CountVectorizer(stop_words='english', min_df = best_threshold)
+
+count.fit(X_train['page'])
+
+X_train = pd.DataFrame(count.transform(X_train['page']).todense(),
+                       columns=count.get_feature_names())
+
+X_test = pd.DataFrame(count.transform(X_test['page']).todense(),
+                       columns=count.get_feature_names())
+
+test_pred = overall_best['Best_Estimator'].iloc[0].predict(X_test)
+
+test_score = accuracy_score(y_test, test_pred)
+
+print "Best model test accuracy:",test_score
+
+ultimate_model = overall_best['Best_Estimator'].iloc[0]
+
+count = CountVectorizer(stop_words='english', min_df = best_threshold)
+
+count.fit(X['page'])
+X = pd.DataFrame(count.transform(X['page']).todense(),
+                 columns=count.get_feature_names())
+
+ultimate_model.fit(X,y)
+
+joblib.dump(count,'count_vectorizer.pkl')
+joblib.dump(ultimate_model,'trained_model.pkl')

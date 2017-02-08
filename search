@@ -1,25 +1,45 @@
 #!/Users/dsanford/anaconda/bin/python
 
-import re
 import sys
-from common.py import sql_engine
-from sqlalchemy import create_engine
 
-if len(sys.argv) < 3:
-    print "Not enough arguments.  Expected \"search [top|full] [search terms]."
+import pandas as pd
+import numpy as np
+
+from sklearn.externals import joblib
+
+from lib.database_module import connect_to_postgres
+
+
+
+if len(sys.argv) < 2:
+    print "Not enough arguments.  Expected at least one search term."
     quit()
 
+    
 
+engine = connect_to_postgres()
 
-def grab_data
-
-#    sql = """
-#    INSERT INTO category (bigint, category_name)
-#    VALUES ({}, {});
-#    """.format(categoryid,categoryname)
-
-#    engine.execute(sql)
+pages = pd.read_sql("SELECT * FROM page;", con=engine[0])
+page_vec = pd.read_sql("SELECT * FROM page_vec;", con=engine[0])
 
 
 
-search_terms = sys.argv[2:]
+search_string = " ".join(sys.argv[1:])
+
+print "Searching top pages for term: \"",search_string,"\""
+
+page_vectorizer = joblib.load("vectorized_pages.pkl")
+
+vectorized_string = page_vectorizer.transform([search_string])
+
+page_vec['similarity'] = \
+    page_vec['page_vec'].apply(lambda x: np.dot(vectorized_string,
+                                                np.array(x)))
+
+page_vec.sort_values(inplace = True, by = 'similarity', ascending=False)
+
+top_five_ids = list(page_vec.head(5)['page_id'])
+
+top_five_pages = pd.concat([pages[pages['page_id'] == pid] for pid in top_five_ids])
+
+print top_five_pages

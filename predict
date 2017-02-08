@@ -1,0 +1,42 @@
+#!/Users/dsanford/anaconda/bin/python
+
+import sys
+
+import numpy as np
+import pandas as pd
+
+from lib.database_module import connect_to_postgres
+
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model.logistic import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
+
+from sklearn.metrics import accuracy_score
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.externals import joblib
+
+from lib.wiki_module import query_page
+
+if len(sys.argv) < 2:
+    print "No arguments passed.  Need a page name."
+    quit()
+
+engine = connect_to_postgres()
+
+model = joblib.load('trained_model.pkl')
+vectorizer = joblib.load('count_vectorizer.pkl')
+
+page = query_page(sys.argv[1])
+
+vectorized_page = pd.DataFrame(vectorizer.transform([page['text']]).todense(),
+                               columns=vectorizer.get_feature_names())
+
+model_prediction = model.predict(vectorized_page)[0]
+
+categories = pd.read_sql("SELECT * FROM category;", con=engine[0])
+
+print "Predicted Category:"
+print categories[categories['category_id'] == model_prediction]
